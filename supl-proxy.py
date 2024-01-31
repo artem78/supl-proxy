@@ -20,6 +20,8 @@ from typing import Iterable, Any
 
 import asn1tools
 
+import sys
+
 log = logging.getLogger
 
 
@@ -73,13 +75,18 @@ async def forward_packet(
     writer: asyncio.StreamWriter,
     replacement: str,
 ) -> str:
+    log(__name__).debug('forward_packet() started')
+
     orig_imsi = replacement
     data = await asyncio.wait_for(reader.read(2), 30.0)
+    log(__name__).debug('len(data) = %d', len(data))
     if len(data) < 2:
         raise ConnectionAbortedError("closed")
     length = struct.unpack(">H", data)[0]
+    log(__name__).debug('length = %d', length)
     data += await asyncio.wait_for(reader.read(length - 2), 1.0)
     pdu = supl_db.decode("ULP-PDU", data)
+    #dump(direction, pdu)
 
     if test_path(pdu, ["sessionID", "setSessionID", "setId", 0], "imsi"):
         orig_imsi = from_tbcd(pdu["sessionID"]["setSessionID"]["setId"][1])
@@ -104,6 +111,7 @@ async def forward_packet(
     data = supl_db.encode("ULP-PDU", pdu)
     writer.write(data)
     await writer.drain()
+    log(__name__).debug('forward_packet() ended')
     return orig_imsi
 
 
@@ -142,8 +150,11 @@ async def handle_connection(
             await forward_packet(
                 supl_db, rrlp_db, "server", sreader, cwriter, orig_imsi
             )
-    except ConnectionError:
-        pass
+    except ConnectionError as e:
+        #pass
+        log(__name__).warning("ConnectionError: "  + str(e))
+        #log(__name__).exception("ConnectionError")
+        #print(e)
     except asyncio.exceptions.TimeoutError:
         log(__name__).warning("Timeout on reader")
     finally:
@@ -155,6 +166,7 @@ async def handle_connection(
 
 
 async def main(args: argparse.Namespace) -> None:
+    log(__name__).info('Using server ' + args.server)
     ulp_files = glob.glob(os.path.join(args.grammar, "supl-*.asn"))
     rrlp_files = glob.glob(os.path.join(args.grammar, "rrlp-*.asn"))
     supl_db = asn1tools.compile_files(ulp_files, "uper", cache_dir="cache")
@@ -225,9 +237,15 @@ args = parser.parse_args()
 
 rfh = RotatingFileHandler(args.logfile, maxBytes=1 << 20, backupCount=5)
 logging.basicConfig(
-    handlers=[rfh],
+    # handlers=[rfh],
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    level=logging.INFO,
+    # level=logging.INFO,
+    #stream=sys.stdout,
+    level=logging.DEBUG,
+    handlers=[
+        rfh,
+        logging.StreamHandler()
+    ]
 )
 
 try:

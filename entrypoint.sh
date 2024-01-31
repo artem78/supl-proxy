@@ -2,6 +2,8 @@
 
 set -ex
 
+chmod 777 /data
+
 if [ "${1:0:1}" = "/" ]; then
 
     exec "$@"
